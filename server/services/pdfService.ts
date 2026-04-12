@@ -1,16 +1,32 @@
 import fs from 'fs';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const pdf = require('pdf-parse');
+import pdf from 'pdf-parse-fork';
 
 export async function extractTextFromPDF(filePath: string): Promise<string> {
+  console.log(`Starting PDF extraction for: ${filePath}`);
   try {
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`File not found at path: ${filePath}`);
+    }
     const dataBuffer = fs.readFileSync(filePath);
+    console.log(`File read into buffer. Size: ${dataBuffer.length} bytes`);
+    
+    if (dataBuffer.length === 0) {
+      throw new Error('File is empty');
+    }
+    
+    console.log("Calling pdf-parse-fork...");
     const data = await pdf(dataBuffer);
+    console.log("pdf-parse-fork complete.");
+    
+    if (!data || typeof data.text !== 'string') {
+      console.error('PDF parsing returned invalid data:', data);
+      return '';
+    }
+    
     return data.text;
-  } catch (error) {
-    console.error('Error parsing PDF:', error);
-    throw new Error('Failed to parse PDF document');
+  } catch (error: any) {
+    console.error('Error in extractTextFromPDF:', error);
+    throw new Error(`Failed to parse PDF document: ${error.message}`);
   }
 }
 

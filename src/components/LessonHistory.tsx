@@ -38,8 +38,8 @@ export default function LessonHistory({ onBack, onSelectPlan }: LessonHistoryPro
   };
 
   const filteredPlans = plans.filter(plan => 
-    plan.topic.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    plan.subject.toLowerCase().includes(searchTerm.toLowerCase())
+    (plan.lesson_topic || plan.topic || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (plan.subject || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleDeletePlan = async (e: React.MouseEvent, id: string) => {
@@ -130,10 +130,10 @@ export default function LessonHistory({ onBack, onSelectPlan }: LessonHistoryPro
                   </div>
                 </div>
                 <h3 className="font-bold text-gray-900 mb-2 group-hover:text-blue-600 transition-colors">
-                  {plan.topic}
+                  {plan.lesson_topic || plan.topic}
                 </h3>
                 <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-50">
-                  <span className="text-xs text-gray-500 font-medium">Class: {plan.class_level}</span>
+                  <span className="text-xs text-gray-500 font-medium">Class: {plan.class || plan.class_level}</span>
                   <ChevronRight size={16} className="text-gray-300 group-hover:text-blue-500 transition-colors" />
                 </div>
               </motion.div>

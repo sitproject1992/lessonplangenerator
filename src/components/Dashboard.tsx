@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Book, FileText, Layout, List, Plus, Sparkles, Clock, Loader2, Trash2 } from 'lucide-react';
+import { Book, FileText, Layout, List, Plus, Sparkles, Clock, Loader2, Trash2, CheckCircle } from 'lucide-react';
 import UploadCard from './UploadCard';
 import DocumentDetails from './DocumentDetails';
+import GroupDetails from './GroupDetails';
 import LessonPlanView from './LessonPlanView';
 import LessonHistory from './LessonHistory';
 import { supabase } from '../lib/supabase';
@@ -9,10 +10,12 @@ import { motion, AnimatePresence } from 'motion/react';
 
 export default function Dashboard() {
   const [documents, setDocuments] = useState<any[]>([]);
+  const [groups, setGroups] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDoc, setSelectedDoc] = useState<any | null>(null);
+  const [selectedGroup, setSelectedGroup] = useState<any | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<any | null>(null);
-  const [view, setView] = useState<'dashboard' | 'details' | 'plan' | 'history'>('dashboard');
+  const [view, setView] = useState<'dashboard' | 'details' | 'group' | 'plan' | 'history'>('dashboard');
 
   useEffect(() => {
     fetchDocuments();
@@ -31,6 +34,7 @@ export default function Dashboard() {
 
       if (error) throw error;
       setDocuments(data || []);
+      groupDocuments(data || []);
     } catch (err) {
       console.error('Error fetching documents:', err);
     } finally {
@@ -38,13 +42,56 @@ export default function Dashboard() {
     }
   };
 
+  const groupDocuments = (docs: any[]) => {
+    const groupMap: { [key: string]: any } = {};
+
+    docs.forEach(doc => {
+      const subject = doc.subject || 'Unknown Subject';
+      const grades = doc.grades || [];
+
+      grades.forEach((grade: string) => {
+        const key = `${grade}-${subject}`;
+        if (!groupMap[key]) {
+          groupMap[key] = {
+            grade,
+            subject,
+            book: null,
+            curriculum: null,
+            guide: null,
+            grid: null,
+            isComplete: false
+          };
+        }
+
+        if (doc.type === 'book') groupMap[key].book = doc;
+        if (doc.type === 'curriculum') groupMap[key].curriculum = doc;
+        if (doc.type === 'guide') groupMap[key].guide = doc;
+        if (doc.type === 'grid') groupMap[key].grid = doc;
+      });
+    });
+
+    const grouped = Object.values(groupMap).map(group => ({
+      ...group,
+      isComplete: !!(group.book && group.curriculum && group.guide && group.grid)
+    }));
+
+    setGroups(grouped);
+  };
+
   const handleUploadSuccess = (newDoc: any) => {
-    setDocuments([newDoc, ...documents]);
+    const updatedDocs = [newDoc, ...documents];
+    setDocuments(updatedDocs);
+    groupDocuments(updatedDocs);
   };
 
   const handleViewDetails = (doc: any) => {
     setSelectedDoc(doc);
     setView('details');
+  };
+
+  const handleViewGroup = (group: any) => {
+    setSelectedGroup(group);
+    setView('group');
   };
 
   const handleGenerateLesson = (plan: any) => {
@@ -86,6 +133,16 @@ export default function Dashboard() {
     return (
       <DocumentDetails 
         document={selectedDoc} 
+        onBack={() => setView('dashboard')} 
+        onGenerateLesson={handleGenerateLesson}
+      />
+    );
+  }
+
+  if (view === 'group' && selectedGroup) {
+    return (
+      <GroupDetails 
+        group={selectedGroup} 
         onBack={() => setView('dashboard')} 
         onGenerateLesson={handleGenerateLesson}
       />
@@ -136,6 +193,70 @@ export default function Dashboard() {
             <UploadCard title="Curriculum" type="curriculum" onUploadSuccess={handleUploadSuccess} />
             <UploadCard title="Teacher Guide" type="guide" onUploadSuccess={handleUploadSuccess} />
             <UploadCard title="Spec Grid" type="grid" onUploadSuccess={handleUploadSuccess} />
+          </div>
+        </section>
+
+        {/* Groups Section */}
+        <section className="mb-12">
+          <div className="flex items-center gap-2 mb-6">
+            <Layout size={20} className="text-blue-600" />
+            <h2 className="text-xl font-bold text-gray-800">Grade-wise Subject Groups</h2>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {groups.length === 0 ? (
+              <div className="col-span-full bg-white rounded-2xl p-12 border border-dashed border-gray-200 text-center text-gray-400">
+                <span className="text-sm font-medium">Upload documents to see groups</span>
+              </div>
+            ) : (
+              groups.map((group, idx) => (
+                <div key={idx} className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-900">{group.subject}</h3>
+                      <span className="text-sm font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">Grade {group.grade}</span>
+                    </div>
+                    {group.isComplete && (
+                      <span className="bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1">
+                        <CheckCircle size={12} /> Complete
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="space-y-3 mb-6">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Book PDF</span>
+                      {group.book ? <CheckCircle size={16} className="text-green-500" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-200" />}
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Curriculum</span>
+                      {group.curriculum ? <CheckCircle size={16} className="text-green-500" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-200" />}
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Teacher Guide</span>
+                      {group.guide ? <CheckCircle size={16} className="text-green-500" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-200" />}
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-500">Spec Grid</span>
+                      {group.grid ? <CheckCircle size={16} className="text-green-500" /> : <div className="w-4 h-4 rounded-full border-2 border-gray-200" />}
+                    </div>
+                  </div>
+
+                  <button 
+                    disabled={!group.isComplete}
+                    onClick={() => handleViewGroup(group)}
+                    className={`w-full py-2 rounded-xl font-semibold flex items-center justify-center gap-2 transition-all ${
+                      group.isComplete 
+                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100' 
+                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                    }`}
+                  >
+                    <Sparkles size={16} />
+                    Generate Lesson Plans
+                  </button>
+                </div>
+              ))
+            )}
           </div>
         </section>
 
