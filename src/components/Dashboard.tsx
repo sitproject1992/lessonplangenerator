@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Book, FileText, Layout, List, Plus, Sparkles, Clock, Loader2, Trash2, CheckCircle } from 'lucide-react';
-import UploadCard from './UploadCard';
+import UnifiedUpload from './UnifiedUpload';
 import DocumentDetails from './DocumentDetails';
 import GroupDetails from './GroupDetails';
 import LessonPlanView from './LessonPlanView';
@@ -182,19 +182,8 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* Upload Grid */}
-        <section className="mb-12">
-          <div className="flex items-center gap-2 mb-6">
-            <Plus size={20} className="text-blue-600" />
-            <h2 className="text-xl font-bold text-gray-800">Upload Resources</h2>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <UploadCard title="Book PDF" type="book" onUploadSuccess={handleUploadSuccess} />
-            <UploadCard title="Curriculum" type="curriculum" onUploadSuccess={handleUploadSuccess} />
-            <UploadCard title="Teacher Guide" type="guide" onUploadSuccess={handleUploadSuccess} />
-            <UploadCard title="Spec Grid" type="grid" onUploadSuccess={handleUploadSuccess} />
-          </div>
-        </section>
+        {/* Upload Section */}
+        <UnifiedUpload onUploadSuccess={handleUploadSuccess} />
 
         {/* Groups Section */}
         <section className="mb-12">
