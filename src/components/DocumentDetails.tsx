@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ChevronRight, BookOpen, Sparkles, Loader2, ArrowLeft, FileText } from 'lucide-react';
+import { ChevronRight, BookOpen, Sparkles, Loader2, ArrowLeft, FileText, CheckCircle } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { motion } from 'motion/react';
 import { generateLessonPlan } from '../services/gemini';
@@ -20,19 +20,29 @@ export default function DocumentDetails({ document, onBack, onGenerateLesson }: 
   }, [document.id]);
 
   const fetchStructure = async () => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
+    console.log('Fetching structure for document:', document.id);
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('content_structure')
-        .select('*')
-        .eq('document_id', document.id)
-        .order('chapter_name', { ascending: true });
+      // Try API first
+      const response = await fetch(`/api/structure/${document.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Fetched ${data?.length || 0} structure items via API`);
+        setStructure(data || []);
+        return;
+      }
 
-      if (error) throw error;
-      setStructure(data || []);
+      // Fallback
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('content_structure')
+          .select('*')
+          .eq('document_id', document.id)
+          .order('chapter_name', { ascending: true });
+
+        if (error) throw error;
+        setStructure(data || []);
+      }
     } catch (err) {
       console.error('Error fetching structure:', err);
     } finally {
@@ -41,20 +51,29 @@ export default function DocumentDetails({ document, onBack, onGenerateLesson }: 
   };
 
   const handleGenerate = async (topic: any) => {
-    if (!supabase) {
-      alert('Supabase is not configured. Please check your environment variables.');
-      return;
+    // If plan already exists, just view it
+    if (topic.lesson_plans && topic.lesson_plans.length > 0) {
+      try {
+        const response = await fetch(`/api/lesson-plan/${topic.lesson_plans[0].id}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data) {
+            onGenerateLesson(data);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching existing plan:', err);
+      }
     }
+
     setGeneratingId(topic.id);
     try {
-      // 1. Get full topic info with document name
-      const { data: topicData, error: topicError } = await supabase
-        .from('content_structure')
-        .select('*, documents(*)')
-        .eq('id', topic.id)
-        .single();
-
-      if (topicError) throw topicError;
+      // 1. Get full topic info with document name via API
+      const topicResponse = await fetch(`/api/topic/${topic.id}`);
+      if (!topicResponse.ok) throw new Error('Failed to fetch topic details');
+      const topicData = await topicResponse.json();
+      if (!topicData) throw new Error('Topic not found');
 
       // 2. Generate with Gemini on frontend
       const lessonPlan = await generateLessonPlan(topicData);
@@ -197,6 +216,11 @@ export default function DocumentDetails({ document, onBack, onGenerateLesson }: 
                           <>
                             <Loader2 size={16} className="animate-spin" />
                             Generating...
+                          </>
+                        ) : (topic.lesson_plans && topic.lesson_plans.length > 0) ? (
+                          <>
+                            <CheckCircle size={16} className="text-green-500" />
+                            View Plan
                           </>
                         ) : (
                           <>

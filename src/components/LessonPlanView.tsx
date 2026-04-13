@@ -1,14 +1,63 @@
-import React from 'react';
-import { ArrowLeft, Download, Share2, Edit3, CheckCircle, List, Target, BookOpen, PenTool, ClipboardCheck, MessageSquare, Copy, Check } from 'lucide-react';
-import { motion } from 'motion/react';
+import React, { useState } from 'react';
+import { ArrowLeft, Download, Share2, Edit3, CheckCircle, List, Target, BookOpen, PenTool, ClipboardCheck, MessageSquare, Copy, Check, Languages, Loader2 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { generateLessonPlan } from '../services/gemini';
+import { supabase } from '../lib/supabase';
 
 interface LessonPlanViewProps {
   plan: any;
   onBack: () => void;
 }
 
-export default function LessonPlanView({ plan, onBack }: LessonPlanViewProps) {
-  const [copied, setCopied] = React.useState(false);
+export default function LessonPlanView({ plan: initialPlan, onBack }: LessonPlanViewProps) {
+  const [plan, setPlan] = useState(initialPlan);
+  const [copied, setCopied] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editForm, setEditForm] = useState(initialPlan);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleTranslate = async (targetLang: string) => {
+    if (isTranslating) return;
+    setIsTranslating(true);
+    try {
+      // 1. Fetch full topic details to get context (curriculum, guide, etc.)
+      const topicResponse = await fetch(`/api/topic/${plan.content_structure_id}`);
+      if (!topicResponse.ok) throw new Error('Failed to fetch topic context');
+      const topicData = await topicResponse.json();
+      
+      // 2. Add target language to topic data
+      topicData.language = targetLang;
+
+      // 3. Generate new plan in target language
+      // Note: We're using the simplified call here, but since topicData now has documents info,
+      // we could potentially fetch other docs if needed. For now, this is much better than before.
+      const newPlanData = await generateLessonPlan(topicData);
+
+      // 4. Save/Update in backend
+      const response = await fetch('/api/save-lesson', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          topicId: plan.content_structure_id,
+          lessonPlan: newPlanData
+        }),
+      });
+
+      if (!response.ok) {
+        console.warn('Failed to save translated plan to database, but showing it locally.');
+        setPlan({ ...newPlanData, content_structure_id: plan.content_structure_id });
+      } else {
+        const result = await response.json();
+        setPlan(result.data);
+      }
+    } catch (err) {
+      console.error('Translation error:', err);
+      alert('Failed to translate lesson plan. Please check your connection and try again.');
+    } finally {
+      setIsTranslating(false);
+    }
+  };
 
   const handleCopy = () => {
     const text = `
@@ -51,6 +100,54 @@ ${plan.remarks}
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Lesson Plan: ${plan.lesson_topic || plan.topic}`,
+          text: `Check out this lesson plan for ${plan.subject} - ${plan.lesson_topic || plan.topic}`,
+          url: window.location.href,
+        });
+      } catch (err) {
+        console.error('Error sharing:', err);
+      }
+    } else {
+      handleCopy();
+      alert('Share not supported on this browser. Link copied to clipboard!');
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    setIsSaving(true);
+    try {
+      const response = await fetch('/api/save-lesson', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          topicId: plan.content_structure_id,
+          lessonPlan: {
+            ...editForm,
+            // Ensure assignments is in the format expected by the backend
+            assignments: typeof editForm.assignments === 'string' 
+              ? { classwork: editForm.assignments, homework: '' }
+              : editForm.assignments
+          }
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to save changes');
+      
+      const result = await response.json();
+      setPlan(result.data);
+      setIsEditing(false);
+    } catch (err) {
+      console.error('Save error:', err);
+      alert('Failed to save changes.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] pb-20">
       <div className="max-w-4xl mx-auto py-8 px-4">
@@ -63,6 +160,27 @@ ${plan.remarks}
             Back to Topics
           </button>
           <div className="flex gap-3">
+            <div className="flex bg-white border border-gray-200 rounded-xl p-1 mr-2">
+              {['English', 'Nepali'].map((lang) => (
+                <button
+                  key={lang}
+                  disabled={isTranslating}
+                  onClick={() => handleTranslate(lang)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    (plan.language || 'English') === lang 
+                      ? 'bg-blue-600 text-white shadow-sm' 
+                      : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  {isTranslating && (plan.language || 'English') !== lang ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : (
+                    <Languages size={12} />
+                  )}
+                  {lang}
+                </button>
+              ))}
+            </div>
             <button 
               onClick={handleCopy}
               className="p-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 transition-all flex items-center gap-2"
@@ -70,18 +188,154 @@ ${plan.remarks}
               {copied ? <Check size={18} className="text-green-500" /> : <Copy size={18} />}
               <span className="text-sm font-medium">{copied ? 'Copied!' : 'Copy'}</span>
             </button>
-            <button className="p-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 transition-all">
+            <button 
+              onClick={handleShare}
+              className="p-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 transition-all"
+            >
               <Share2 size={18} />
             </button>
             <button className="p-2.5 bg-white border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-50 transition-all">
               <Download size={18} />
             </button>
-            <button className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100">
+            <button 
+              onClick={() => {
+                setEditForm(plan);
+                setIsEditing(true);
+              }}
+              className="bg-blue-600 text-white px-5 py-2.5 rounded-xl font-semibold flex items-center gap-2 hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
+            >
               <Edit3 size={18} />
               Edit Plan
             </button>
           </div>
         </div>
+
+        <AnimatePresence>
+          {isEditing && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl"
+              >
+                <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-gray-50">
+                  <h2 className="text-xl font-bold text-gray-900">Edit Lesson Plan</h2>
+                  <button onClick={() => setIsEditing(false)} className="text-gray-400 hover:text-gray-600">
+                    <ArrowLeft size={24} />
+                  </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-8 space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-1">Subject</label>
+                      <input 
+                        type="text" 
+                        value={editForm.subject} 
+                        onChange={e => setEditForm({...editForm, subject: e.target.value})}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-700 mb-1">Class</label>
+                      <input 
+                        type="text" 
+                        value={editForm.class || editForm.class_level} 
+                        onChange={e => setEditForm({...editForm, class: e.target.value})}
+                        className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Topic</label>
+                    <input 
+                      type="text" 
+                      value={editForm.lesson_topic || editForm.topic} 
+                      onChange={e => setEditForm({...editForm, lesson_topic: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Learning Outcomes (One per line)</label>
+                    <textarea 
+                      rows={4}
+                      value={editForm.learning_outcomes.join('\n')} 
+                      onChange={e => setEditForm({...editForm, learning_outcomes: e.target.value.split('\n')})}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Warm up & Review</label>
+                    <textarea 
+                      rows={3}
+                      value={editForm.warmup_review} 
+                      onChange={e => setEditForm({...editForm, warmup_review: e.target.value})}
+                      className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <h3 className="font-bold text-gray-900 border-b pb-2">Activities</h3>
+                      {['a', 'b', 'c', 'd'].map(key => (
+                        <div key={key}>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Activity {key}</label>
+                          <textarea 
+                            rows={2}
+                            value={(editForm.teaching_learning_activities || editForm.teaching_activities)[key]} 
+                            onChange={e => {
+                              const activities = { ...(editForm.teaching_learning_activities || editForm.teaching_activities), [key]: e.target.value };
+                              setEditForm({...editForm, teaching_learning_activities: activities});
+                            }}
+                            className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-4">
+                      <h3 className="font-bold text-gray-900 border-b pb-2">Evaluation</h3>
+                      {['a', 'b', 'c', 'd'].map(key => (
+                        <div key={key}>
+                          <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Evaluation {key}</label>
+                          <textarea 
+                            rows={2}
+                            value={editForm.evaluation[key]} 
+                            onChange={e => {
+                              const evaluation = { ...editForm.evaluation, [key]: e.target.value };
+                              setEditForm({...editForm, evaluation});
+                            }}
+                            className="w-full px-4 py-2 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50">
+                  <button 
+                    onClick={() => setIsEditing(false)}
+                    className="px-6 py-2.5 text-gray-600 font-semibold hover:bg-gray-100 rounded-xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleSaveEdit}
+                    disabled={isSaving}
+                    className="px-8 py-2.5 bg-blue-600 text-white font-semibold rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-100 flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {isSaving ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle size={18} />}
+                    {isSaving ? 'Saving...' : 'Save Changes'}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
@@ -175,13 +429,17 @@ ${plan.remarks}
                 <div className="border-r-2 border-gray-900">
                   <div className="bg-gray-50 p-2 text-center font-bold border-b-2 border-gray-900 text-sm">Class Work</div>
                   <div className="p-4 min-h-[100px]">
-                    <p className="text-gray-700 text-sm underline decoration-dotted underline-offset-4 leading-relaxed">${plan.assignments?.classwork || plan.assignments_classwork || plan.assignments}</p>
+                    <p className="text-gray-700 text-sm underline decoration-dotted underline-offset-4 leading-relaxed">
+                      {typeof plan.assignments === 'object' ? plan.assignments?.classwork : plan.assignments}
+                    </p>
                   </div>
                 </div>
                 <div>
                   <div className="bg-gray-50 p-2 text-center font-bold border-b-2 border-gray-900 text-sm">Home Assignment</div>
                   <div className="p-4 min-h-[100px]">
-                    <p className="text-gray-700 text-sm underline decoration-dotted underline-offset-4 leading-relaxed">${plan.assignments?.homework || plan.assignments_homework || ''}</p>
+                    <p className="text-gray-700 text-sm underline decoration-dotted underline-offset-4 leading-relaxed">
+                      {typeof plan.assignments === 'object' ? plan.assignments?.homework : ''}
+                    </p>
                   </div>
                 </div>
               </div>

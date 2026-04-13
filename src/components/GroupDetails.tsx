@@ -20,19 +20,29 @@ export default function GroupDetails({ group, onBack, onGenerateLesson }: GroupD
   }, [group.book.id]);
 
   const fetchStructure = async () => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
+    console.log('Fetching structure for book:', group.book.id);
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('content_structure')
-        .select('*')
-        .eq('document_id', group.book.id)
-        .order('chapter_name', { ascending: true });
+      // Try API first
+      const response = await fetch(`/api/structure/${group.book.id}`);
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Fetched ${data?.length || 0} structure items via API`);
+        setStructure(data || []);
+        return;
+      }
 
-      if (error) throw error;
-      setStructure(data || []);
+      // Fallback
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('content_structure')
+          .select('*')
+          .eq('document_id', group.book.id)
+          .order('chapter_name', { ascending: true });
+
+        if (error) throw error;
+        setStructure(data || []);
+      }
     } catch (err) {
       console.error('Error fetching structure:', err);
     } finally {
@@ -41,6 +51,22 @@ export default function GroupDetails({ group, onBack, onGenerateLesson }: GroupD
   };
 
   const handleGenerate = async (topic: any) => {
+    // If plan already exists, just view it
+    if (topic.lesson_plans && topic.lesson_plans.length > 0) {
+      try {
+        const response = await fetch(`/api/lesson-plan/${topic.lesson_plans[0].id}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data) {
+            onGenerateLesson(data);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error('Error fetching existing plan:', err);
+      }
+    }
+
     if (!supabase) {
       alert('Supabase is not configured.');
       return;
@@ -60,7 +86,16 @@ export default function GroupDetails({ group, onBack, onGenerateLesson }: GroupD
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to save lesson plan');
+      if (!response.ok) {
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const errData = await response.json();
+          throw new Error(errData.error || 'Failed to save lesson plan');
+        } else {
+          const text = await response.text();
+          throw new Error(`Server error (${response.status}): ${text.substring(0, 100)}`);
+        }
+      }
 
       const data = await response.json();
       onGenerateLesson(data.data);
@@ -147,6 +182,12 @@ export default function GroupDetails({ group, onBack, onGenerateLesson }: GroupD
               <Loader2 className="animate-spin text-blue-500" size={32} />
               <p className="text-gray-500 font-medium">Loading lessons...</p>
             </div>
+          ) : Object.keys(chapters).length === 0 ? (
+            <div className="bg-white rounded-3xl p-16 text-center border border-gray-100 shadow-sm">
+              <FileText size={48} className="mx-auto text-gray-200 mb-4" />
+              <h3 className="text-lg font-bold text-gray-800 mb-1">No lessons found</h3>
+              <p className="text-gray-500">We couldn't find any topics for this book. Try re-uploading the book PDF.</p>
+            </div>
           ) : (
             Object.entries(chapters).map(([chapter, topics]: [string, any]) => (
               <motion.div 
@@ -179,6 +220,11 @@ export default function GroupDetails({ group, onBack, onGenerateLesson }: GroupD
                           <>
                             <Loader2 size={16} className="animate-spin" />
                             Generating...
+                          </>
+                        ) : (topic.lesson_plans && topic.lesson_plans.length > 0) ? (
+                          <>
+                            <CheckCircle size={16} className="text-green-500" />
+                            View Plan
                           </>
                         ) : (
                           <>

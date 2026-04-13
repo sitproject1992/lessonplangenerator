@@ -63,6 +63,88 @@ async function startServer() {
     res.json({ status: "ok", message: "EduPlan AI Server is running" });
   });
 
+  app.get("/api/documents", async (req, res) => {
+    try {
+      if (!supabase) {
+        return res.status(503).json({ error: "Supabase not configured on server" });
+      }
+      const { data, error } = await supabase
+        .from("documents")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      res.json(data || []);
+    } catch (error: any) {
+      console.error("Fetch documents error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/structure/:docId", async (req, res) => {
+    try {
+      if (!supabase) {
+        return res.status(503).json({ error: "Supabase not configured on server" });
+      }
+      const { docId } = req.params;
+      
+      const { data: structure, error: structError } = await supabase
+        .from("content_structure")
+        .select(`
+          *,
+          lesson_plans (id)
+        `)
+        .eq("document_id", docId)
+        .order("chapter_name", { ascending: true });
+
+      if (structError) throw structError;
+      res.json(structure || []);
+    } catch (error: any) {
+      console.error("Fetch structure error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/topic/:id", async (req, res) => {
+    try {
+      if (!supabase) {
+        return res.status(503).json({ error: "Supabase not configured on server" });
+      }
+      const { id } = req.params;
+      const { data, error } = await supabase
+        .from("content_structure")
+        .select("*, documents(*)")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (error) throw error;
+      res.json(data);
+    } catch (error: any) {
+      console.error("Fetch topic error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/lesson-plan/:id", async (req, res) => {
+    try {
+      if (!supabase) {
+        return res.status(503).json({ error: "Supabase not configured on server" });
+      }
+      const { id } = req.params;
+      const { data, error } = await supabase
+        .from("lesson_plans")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (error) throw error;
+      res.json(data);
+    } catch (error: any) {
+      console.error("Fetch lesson plan error:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.post("/api/upload", upload.single("file"), async (req, res) => {
     console.log("POST /api/upload - Start");
     try {
@@ -71,9 +153,9 @@ async function startServer() {
         return res.status(503).json({ error: "Supabase not configured on server. Please check environment variables." });
       }
       const file = req.file;
-      const { type, name, subject, grades } = req.body;
+      const { type, name, subject, grades, language } = req.body;
 
-      console.log("Upload params:", { type, name, subject, grades, hasFile: !!file });
+      console.log("Upload params:", { type, name, subject, grades, language, hasFile: !!file });
 
       if (!file) {
         return res.status(400).json({ error: "No file uploaded" });
@@ -120,6 +202,7 @@ async function startServer() {
             type: type,
             subject: subject,
             grades: gradesArray,
+            language: language || 'English',
             file_path: publicUrlData.publicUrl,
             status: "processing",
             content: cleanText,
@@ -199,22 +282,81 @@ async function startServer() {
       }
       const { topicId, lessonPlan } = req.body;
 
-      const { data, error } = await supabase
+      if (!lessonPlan) {
+        return res.status(400).json({ error: "No lesson plan data provided" });
+      }
+
+      console.log("Saving lesson plan for topic:", topicId);
+
+      // Validate topicId as UUID
+      const isValidUUID = (uuid: string) => {
+        const regex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        return regex.test(uuid);
+      };
+
+      // Map the AI output to the database schema with fallbacks
+      const mappedPlan: any = {
+        subject: lessonPlan.subject || "N/A",
+        class_level: lessonPlan.class || "N/A",
+        unit: lessonPlan.unit || "N/A",
+        topic: lessonPlan.lesson_topic || "N/A",
+        learning_outcomes: Array.isArray(lessonPlan.learning_outcomes) ? lessonPlan.learning_outcomes.map((o: any) => String(o)) : ["N/A", "N/A", "N/A", "N/A"],
+        warmup_review: lessonPlan.warmup_review || "",
+        teaching_activities: lessonPlan.teaching_learning_activities || lessonPlan.teaching_activities || { a: "", b: "", c: "", d: "" },
+        evaluation: lessonPlan.evaluation || { a: "", b: "", c: "", d: "" },
+        remarks: lessonPlan.remarks || "",
+        content_structure_id: (topicId && isValidUUID(topicId)) ? topicId : null,
+      };
+
+      // Handle assignments which could be an object or a string
+      if (typeof lessonPlan.assignments === 'object' && lessonPlan.assignments !== null) {
+        mappedPlan.assignments = `Classwork: ${lessonPlan.assignments.classwork || ""}\nHomework: ${lessonPlan.assignments.homework || ""}`;
+      } else {
+        mappedPlan.assignments = lessonPlan.assignments || "";
+      }
+
+      console.log("Mapped plan for insertion:", JSON.stringify(mappedPlan, null, 2));
+
+      // Try to insert with language first
+      const planWithLanguage = { ...mappedPlan, language: lessonPlan.language || 'English' };
+      
+      let { data, error } = await supabase
         .from("lesson_plans")
-        .insert([
-          {
-            ...lessonPlan,
-            content_structure_id: topicId,
-          },
-        ])
+        .upsert([planWithLanguage], { onConflict: 'content_structure_id' })
         .select();
 
-      if (error) throw error;
+      // If it fails because of missing language column, retry without it
+      if (error && error.message && error.message.includes('column "language"')) {
+        console.warn("Language column missing in lesson_plans table, retrying without it.");
+        const retry = await supabase
+          .from("lesson_plans")
+          .upsert([mappedPlan], { onConflict: 'content_structure_id' })
+          .select();
+        data = retry.data;
+        error = retry.error;
+      }
 
-      res.json({ message: "Lesson plan saved successfully", data: data[0] });
+      if (error) {
+        console.error("Supabase save lesson error details:", {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        });
+        return res.status(500).json({ 
+          error: error.message || "Database error saving lesson plan",
+          details: error,
+          code: error.code
+        });
+      }
+
+      res.json({ message: "Lesson plan saved successfully", data: data ? data[0] : null });
     } catch (error: any) {
       console.error("Save lesson error:", error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ 
+        error: error.message || "Failed to save lesson plan",
+        details: error
+      });
     }
   });
 

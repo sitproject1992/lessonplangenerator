@@ -20,7 +20,8 @@ export default function UnifiedUpload({ onUploadSuccess }: UnifiedUploadProps) {
   const [metadata, setMetadata] = useState({
     title: '',
     subject: '',
-    grade: ''
+    grade: '',
+    language: 'English'
   });
 
   const [files, setFiles] = useState<Record<DocType, FileState>>({
@@ -57,6 +58,7 @@ export default function UnifiedUpload({ onUploadSuccess }: UnifiedUploadProps) {
     formData.append('name', type === 'book' ? metadata.title : fileState.file.name);
     formData.append('subject', metadata.subject);
     formData.append('grades', metadata.grade);
+    formData.append('language', metadata.language);
 
     try {
       const response = await fetch('/api/upload', {
@@ -120,19 +122,28 @@ export default function UnifiedUpload({ onUploadSuccess }: UnifiedUploadProps) {
     setIsUploadingAll(true);
 
     try {
-      const uploadPromises = (Object.keys(files) as DocType[])
-        .filter(type => files[type].file !== null)
-        .map(type => uploadSingleFile(type));
+      const uploadTypes = (Object.keys(files) as DocType[])
+        .filter(type => files[type].file !== null);
 
-      const results = await Promise.all(uploadPromises);
+      // Use allSettled to handle partial successes
+      const results = await Promise.allSettled(uploadTypes.map(type => uploadSingleFile(type)));
       
-      // Notify parent of each success
-      results.forEach(doc => {
-        if (doc) onUploadSuccess(doc);
+      let successCount = 0;
+      results.forEach((result) => {
+        if (result.status === 'fulfilled' && result.value) {
+          onUploadSuccess(result.value);
+          successCount++;
+        }
       });
 
+      if (successCount === 0) {
+        setGlobalError('All uploads failed. Please check individual statuses.');
+      } else if (successCount < uploadTypes.length) {
+        setGlobalError(`Some uploads failed. Successfully processed ${successCount} files.`);
+      }
+
     } catch (err: any) {
-      setGlobalError('Some uploads failed. Please check individual statuses.');
+      setGlobalError('An unexpected error occurred during upload.');
     } finally {
       setIsUploadingAll(false);
     }
@@ -233,6 +244,24 @@ export default function UnifiedUpload({ onUploadSuccess }: UnifiedUploadProps) {
               onChange={(e) => setMetadata(prev => ({ ...prev, grade: e.target.value }))}
               className="w-full px-6 py-4 bg-white border border-gray-200 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all text-gray-700 font-medium"
             />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-bold text-gray-800 ml-1">Target Language</label>
+            <div className="flex bg-white border border-gray-200 rounded-2xl p-1">
+              {['English', 'Nepali'].map((lang) => (
+                <button
+                  key={lang}
+                  onClick={() => setMetadata(prev => ({ ...prev, language: lang }))}
+                  className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+                    metadata.language === lang 
+                      ? 'bg-blue-600 text-white shadow-md' 
+                      : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  {lang}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 

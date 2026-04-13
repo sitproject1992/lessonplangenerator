@@ -21,20 +21,39 @@ export default function Dashboard() {
     fetchDocuments();
   }, []);
 
-  const fetchDocuments = async () => {
-    if (!supabase) {
-      setLoading(false);
-      return;
-    }
-    try {
-      const { data, error } = await supabase
-        .from('documents')
-        .select('*')
-        .order('created_at', { ascending: false });
+  useEffect(() => {
+    groupDocuments(documents);
+  }, [documents]);
 
-      if (error) throw error;
-      setDocuments(data || []);
-      groupDocuments(data || []);
+  const fetchDocuments = async () => {
+    console.log('Fetching documents...');
+    setLoading(true);
+    try {
+      // Try fetching via API first for better reliability in this environment
+      const response = await fetch('/api/documents');
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`Fetched ${data?.length || 0} documents via API`);
+        setDocuments(data || []);
+        return;
+      }
+
+      // Fallback to direct Supabase if API fails and client exists
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('documents')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) {
+          console.error('Supabase fetch error:', error);
+          throw error;
+        }
+        console.log(`Fetched ${data?.length || 0} documents via Supabase client`);
+        setDocuments(data || []);
+      } else {
+        console.warn('Both API and Supabase client unavailable');
+      }
     } catch (err) {
       console.error('Error fetching documents:', err);
     } finally {
@@ -43,18 +62,31 @@ export default function Dashboard() {
   };
 
   const groupDocuments = (docs: any[]) => {
+    if (!docs || docs.length === 0) {
+      setGroups([]);
+      return;
+    }
     const groupMap: { [key: string]: any } = {};
 
     docs.forEach(doc => {
-      const subject = doc.subject || 'Unknown Subject';
-      const grades = doc.grades || [];
+      const subject = (doc.subject || 'Unknown Subject').toString().trim();
+      // Ensure grades is an array, handle potential string format from DB
+      let grades: any[] = [];
+      if (Array.isArray(doc.grades)) {
+        grades = doc.grades;
+      } else if (typeof doc.grades === 'string') {
+        // Handle cases where it might be a comma-separated string or Postgres array string format
+        grades = doc.grades.replace(/[{}]/g, '').split(',').map(g => g.trim()).filter(Boolean);
+      }
 
-      grades.forEach((grade: string) => {
-        const key = `${grade}-${subject}`;
+      grades.forEach((grade: any) => {
+        const normalizedGrade = grade.toString().trim();
+        const key = `${normalizedGrade.toLowerCase()}-${subject.toLowerCase()}`;
+        
         if (!groupMap[key]) {
           groupMap[key] = {
-            grade,
-            subject,
+            grade: normalizedGrade,
+            subject: subject,
             book: null,
             curriculum: null,
             guide: null,
@@ -79,9 +111,7 @@ export default function Dashboard() {
   };
 
   const handleUploadSuccess = (newDoc: any) => {
-    const updatedDocs = [newDoc, ...documents];
-    setDocuments(updatedDocs);
-    groupDocuments(updatedDocs);
+    setDocuments(prev => [newDoc, ...prev]);
   };
 
   const handleViewDetails = (doc: any) => {
@@ -168,6 +198,14 @@ export default function Dashboard() {
             <p className="text-gray-500 font-medium">Generate intelligent lesson plans from your curriculum resources.</p>
           </div>
           <div className="flex gap-3">
+            <button 
+              onClick={fetchDocuments}
+              className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl font-medium flex items-center gap-2 hover:bg-gray-50 transition-all"
+              disabled={loading}
+            >
+              {loading ? <Loader2 size={18} className="animate-spin" /> : <List size={18} />}
+              Refresh
+            </button>
             <button 
               onClick={() => setView('history')}
               className="bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl font-medium flex items-center gap-2 hover:bg-gray-50 transition-all"

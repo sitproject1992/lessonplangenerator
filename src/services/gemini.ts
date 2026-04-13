@@ -17,6 +17,9 @@ export async function structureDocument(text: string, type: string) {
     Analyze the following text from a ${type} document and extract the educational structure.
     Identify Chapters, Units, and Topics.
     
+    IMPORTANT: The input text might be encoded in Preeti font (which looks like Latin characters but represents Nepali). 
+    If you detect this encoding (e.g., text like ":yfgLo If]qdf"), you MUST decode it to proper Unicode Devanagari Nepali (e.g., "स्थानीय क्षेत्रमा") in your output.
+    
     Text: ${text.substring(0, 30000)}
   `;
 
@@ -44,8 +47,15 @@ export async function structureDocument(text: string, type: string) {
 }
 
 export async function generateLessonPlan(topicData: any, groupDocs?: any) {
+  const language = topicData.language || (groupDocs && groupDocs.book && groupDocs.book.language) || "English";
+  
   const prompt = `
-    Generate a detailed lesson plan for the following topic.
+    Generate a detailed lesson plan for the following topic in ${language} language.
+    ${language === 'Nepali' ? 'CRITICAL: The entire lesson plan MUST be written in Nepali script (Unicode Devanagari).' : 'The entire lesson plan MUST be written in English.'}
+    
+    IMPORTANT: The input context and topic info might contain text encoded in Preeti font (Latin characters representing Nepali). 
+    If you detect this, you MUST decode it to proper Unicode Devanagari Nepali before using it for reasoning or translation.
+    
     ${groupDocs ? 'CRITICAL: You MUST align this lesson plan with the provided Curriculum objectives, Teacher Guide instructions, and Specification Grid requirements.' : ''}
     
     Topic Info:
@@ -120,12 +130,13 @@ export async function generateLessonPlan(topicData: any, groupDocs?: any) {
             },
             required: ["classwork", "homework"]
           },
-          remarks: { type: Type.STRING }
+          remarks: { type: Type.STRING },
+          language: { type: Type.STRING }
         },
         required: [
           "subject", "class", "unit", "lesson_topic", "learning_outcomes", 
           "warmup_review", "teaching_learning_activities", "evaluation", 
-          "assignments", "remarks"
+          "assignments", "remarks", "language"
         ]
       }
     }

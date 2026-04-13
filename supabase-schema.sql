@@ -7,6 +7,7 @@ CREATE TABLE documents (
     name TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('book', 'curriculum', 'guide', 'grid')),
     file_path TEXT NOT NULL,
+    language TEXT DEFAULT 'English',
     parsed_content JSONB,
     status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'error'))
 );
@@ -38,7 +39,8 @@ CREATE TABLE lesson_plans (
     evaluation JSONB NOT NULL, -- {a, b, c, d}
     assignments TEXT,
     remarks TEXT,
-    content_structure_id UUID REFERENCES content_structure(id) ON DELETE SET NULL
+    language TEXT DEFAULT 'English',
+    content_structure_id UUID UNIQUE REFERENCES content_structure(id) ON DELETE SET NULL
 );
 
 -- Enable Row Level Security (RLS)
@@ -46,7 +48,7 @@ ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE content_structure ENABLE ROW LEVEL SECURITY;
 ALTER TABLE lesson_plans ENABLE ROW LEVEL SECURITY;
 
--- Create policies (Simplified for now, assuming authenticated users can do everything)
-CREATE POLICY "Allow all for authenticated users" ON documents FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow all for authenticated users" ON content_structure FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Allow all for authenticated users" ON lesson_plans FOR ALL USING (auth.role() = 'authenticated');
+-- Create policies (Permissive for development)
+CREATE POLICY "Allow all for everyone" ON documents FOR ALL USING (true);
+CREATE POLICY "Allow all for everyone" ON content_structure FOR ALL USING (true);
+CREATE POLICY "Allow all for everyone" ON lesson_plans FOR ALL USING (true);
